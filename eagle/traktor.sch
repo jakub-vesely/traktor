@@ -5336,7 +5336,7 @@ Source: www.kingbright.com</description>
 <part name="A1" library="traktor" deviceset="I_O_PIN" device=""/>
 <part name="GND" library="traktor" deviceset="I_O_PIN" device=""/>
 <part name="VIN" library="traktor" deviceset="I_O_PIN" device=""/>
-<part name="D13" library="traktor" deviceset="I_O_PIN" device=""/>
+<part name="5V_1" library="traktor" deviceset="I_O_PIN" device=""/>
 <part name="A2" library="traktor" deviceset="I_O_PIN" device=""/>
 <part name="D6" library="traktor" deviceset="I_O_PIN" device=""/>
 <part name="5V" library="traktor" deviceset="I_O_PIN" device=""/>
@@ -5370,7 +5370,7 @@ Source: www.kingbright.com</description>
 <instance part="A1" gate="G$1" x="-78.74" y="73.66" rot="R90"/>
 <instance part="GND" gate="G$1" x="-83.82" y="73.66" rot="R90"/>
 <instance part="VIN" gate="G$1" x="-88.9" y="73.66" rot="R90"/>
-<instance part="D13" gate="G$1" x="-53.34" y="73.66" rot="R90"/>
+<instance part="5V_1" gate="G$1" x="-53.34" y="73.66" rot="R90"/>
 <instance part="A2" gate="G$1" x="-68.58" y="73.66" rot="R90"/>
 <instance part="D6" gate="G$1" x="127" y="12.7"/>
 <instance part="5V" gate="G$1" x="127" y="7.62"/>
@@ -5503,9 +5503,9 @@ Source: www.kingbright.com</description>
 <pinref part="U$1" gate="G$1" pin="A4_SDA"/>
 <wire x1="-33.02" y1="-2.54" x2="-15.24" y2="-2.54" width="0.1524" layer="91"/>
 <pinref part="SDA" gate="G$1" pin="P$1"/>
-<wire x1="-58.42" y1="73.66" x2="-58.42" y2="50.8" width="0.1524" layer="91"/>
-<wire x1="-58.42" y1="50.8" x2="-40.64" y2="50.8" width="0.1524" layer="91"/>
-<wire x1="-40.64" y1="50.8" x2="-40.64" y2="-7.62" width="0.1524" layer="91"/>
+<wire x1="-58.42" y1="73.66" x2="-58.42" y2="45.72" width="0.1524" layer="91"/>
+<wire x1="-58.42" y1="45.72" x2="-40.64" y2="45.72" width="0.1524" layer="91"/>
+<wire x1="-40.64" y1="45.72" x2="-40.64" y2="-7.62" width="0.1524" layer="91"/>
 <junction x="-40.64" y="-7.62"/>
 </segment>
 </net>
@@ -5517,10 +5517,10 @@ Source: www.kingbright.com</description>
 <pinref part="U$3" gate="G$1" pin="SCL"/>
 <wire x1="-38.1" y1="-2.54" x2="-45.72" y2="-2.54" width="0.1524" layer="91"/>
 <wire x1="-45.72" y1="-2.54" x2="-53.34" y2="-2.54" width="0.1524" layer="91"/>
-<wire x1="-45.72" y1="-2.54" x2="-45.72" y2="45.72" width="0.1524" layer="91"/>
+<wire x1="-45.72" y1="-2.54" x2="-45.72" y2="40.64" width="0.1524" layer="91"/>
 <pinref part="SCL" gate="G$1" pin="P$1"/>
-<wire x1="-45.72" y1="45.72" x2="-63.5" y2="45.72" width="0.1524" layer="91"/>
-<wire x1="-63.5" y1="45.72" x2="-63.5" y2="73.66" width="0.1524" layer="91"/>
+<wire x1="-45.72" y1="40.64" x2="-63.5" y2="40.64" width="0.1524" layer="91"/>
+<wire x1="-63.5" y1="40.64" x2="-63.5" y2="73.66" width="0.1524" layer="91"/>
 <junction x="-45.72" y="-2.54"/>
 </segment>
 </net>
@@ -5546,16 +5546,6 @@ Source: www.kingbright.com</description>
 <pinref part="A1" gate="G$1" pin="P$1"/>
 <wire x1="-15.24" y1="12.7" x2="-78.74" y2="12.7" width="0.1524" layer="91"/>
 <wire x1="-78.74" y1="12.7" x2="-78.74" y2="73.66" width="0.1524" layer="91"/>
-</segment>
-</net>
-<net name="N$16" class="0">
-<segment>
-<pinref part="D13" gate="G$1" pin="P$1"/>
-<wire x1="-53.34" y1="55.88" x2="-53.34" y2="73.66" width="0.1524" layer="91"/>
-<wire x1="-53.34" y1="55.88" x2="-35.56" y2="55.88" width="0.1524" layer="91"/>
-<wire x1="-35.56" y1="55.88" x2="-35.56" y2="33.02" width="0.1524" layer="91"/>
-<pinref part="U$1" gate="G$1" pin="D13"/>
-<wire x1="-35.56" y1="33.02" x2="-15.24" y2="33.02" width="0.1524" layer="91"/>
 </segment>
 </net>
 <net name="N$1" class="0">
@@ -5588,6 +5578,10 @@ Source: www.kingbright.com</description>
 <wire x1="127" y1="7.62" x2="121.92" y2="7.62" width="0.1524" layer="91"/>
 <wire x1="121.92" y1="7.62" x2="121.92" y2="50.8" width="0.1524" layer="91"/>
 <junction x="121.92" y="50.8"/>
+<wire x1="-30.48" y1="50.8" x2="-53.34" y2="50.8" width="0.1524" layer="91"/>
+<pinref part="5V_1" gate="G$1" pin="P$1"/>
+<wire x1="-53.34" y1="50.8" x2="-53.34" y2="73.66" width="0.1524" layer="91"/>
+<junction x="-30.48" y="50.8"/>
 </segment>
 </net>
 <net name="N$9" class="0">
