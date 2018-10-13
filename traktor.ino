@@ -18,9 +18,15 @@ LiquidCrystal lcd(12, 10, 5, 4, 3, 2);
 #define ROWS 2
 #define COLUMNS 16
 
-int mode = 0;
-#define MAX_MODE 4
+int mayorMode = 0;
+#define MAX_MAYOR_MODE 1
+
+int zirafaMode = 0;
 bool pressed = false;
+
+float lastPressure = 0;
+int lastXAngle = 0;
+int lastYAngle = 0;
 
 struct Eeprom
 {
@@ -28,17 +34,17 @@ struct Eeprom
   int16_t yDegreeComp; //y
   int16_t pressureOffset; //o
   int16_t pressureDivider; //d
-  int16_t positionCount; //c
-  int16_t multiplier0; //1
-  int16_t multiplier1; //1
-  int16_t multiplier2; //2
-  int16_t multiplier3; //3
-  int16_t multiplier4; //4
-  int16_t multiplier5; //5
-  int16_t multiplier6; //6
-  int16_t multiplier7; //7
-  int16_t multiplier8; //8
-  int16_t multiplier9; //9
+  int16_t angleSensitivity; //s
+  int16_t pressureSensitivity; //S  
+  int16_t maxValue0; //1
+  int16_t maxValue1; //1
+  int16_t maxValue2; //2
+  int16_t maxValue3; //3
+  int16_t maxValue4; //4
+  int16_t maxValue5; //5
+  int16_t maxValue6; //6
+  int16_t maxValue7; //7
+  int16_t maxValue8; //8
   int16_t limit;
 } eeprom;
 
@@ -211,15 +217,24 @@ void ProcessCommand()
     {
       if (!Serial.available())
       {
-         Serial.write("Commands:\n");
-         Serial.write("x - xDegreeComp\n");
-         Serial.write("y - yDegreeComp\n");
-         Serial.write("o - pressureOffset\n");
-         Serial.write("d - pressureDivider\n");
-         Serial.write("c - positionCount\n");
-         Serial.write("0 - multiplier0\n");
-         Serial.write("...\n");
-         Serial.write("9 - multiplier9\n");
+         Serial.write("Příkazy:\n");
+         Serial.write("x (xDegreeComp) - kompenzace predo-zadni osy\n");
+         Serial.write("y (yDegreeComp) - kompenzace levo-prave osy\n");
+         Serial.write("s (angleSensitivity) - senzitivita uhlu\n");
+         Serial.write("S (pressureSensitivity) - tlakova senzitivita * 10\n");   
+         Serial.write("o (pressureOffset) - ofset tlakoveho senzoru\n");
+         Serial.write("d (pressureDivider) - delitel tlakového senzoru\n");
+         Serial.write("0 (maxValue0) - maximalni hodnota pro bod1 a pozici1 \n");
+         Serial.write("1 (maxValue1) - maximalni hodnota pro bod1 a pozici2 \n");
+         Serial.write("2 (maxValue2) - maximalni hodnota pro bod1 a pozici3 \n");
+         Serial.write("3 (maxValue3) - maximalni hodnota pro bod2 a pozici1 \n");
+         Serial.write("4 (maxValue4) - maximalni hodnota pro bod2 a pozici2 \n");
+         Serial.write("5 (maxValue5) - maximalni hodnota pro bod2 a pozici4 \n");
+         Serial.write("6 (maxValue6) - maximalni hodnota pro bod3 a pozici1 \n");
+         Serial.write("7 (maxValue7) - maximalni hodnota pro bod3 a pozici2 \n");
+         Serial.write("8 (maxValue8) - maximalni hodnota pro bod3 a pozici3 \n");
+         Serial.write("? - tato napoveda\n");
+         Serial.write("?X - aktualni hodnota, kde X je znak pro pozadovanou hodnotu\n");
          return;
       }
       command = Serial.read();
@@ -232,17 +247,17 @@ void ProcessCommand()
       case 'y': _ProcessCommand(command, setValue, eeprom.yDegreeComp); break;
       case 'o': _ProcessCommand(command, setValue, eeprom.pressureOffset); break;
       case 'd': _ProcessCommand(command, setValue, eeprom.pressureDivider); break;
-      case 'c': _ProcessCommand(command, setValue, eeprom.positionCount); break;
-      case '0': _ProcessCommand(command, setValue, eeprom.multiplier0); break;
-      case '1': _ProcessCommand(command, setValue, eeprom.multiplier1); break;
-      case '2': _ProcessCommand(command, setValue, eeprom.multiplier2); break;
-      case '3': _ProcessCommand(command, setValue, eeprom.multiplier3); break;
-      case '4': _ProcessCommand(command, setValue, eeprom.multiplier4); break;
-      case '5': _ProcessCommand(command, setValue, eeprom.multiplier5); break;
-      case '6': _ProcessCommand(command, setValue, eeprom.multiplier6); break;
-      case '7': _ProcessCommand(command, setValue, eeprom.multiplier7); break;
-      case '8': _ProcessCommand(command, setValue, eeprom.multiplier8); break;
-      case '9': _ProcessCommand(command, setValue, eeprom.multiplier9); break;
+      case 's': _ProcessCommand(command, setValue, eeprom.angleSensitivity); break;
+      case 'S': _ProcessCommand(command, setValue, eeprom.pressureSensitivity); break;
+      case '0': _ProcessCommand(command, setValue, eeprom.maxValue0); break;
+      case '1': _ProcessCommand(command, setValue, eeprom.maxValue1); break;
+      case '2': _ProcessCommand(command, setValue, eeprom.maxValue2); break;
+      case '3': _ProcessCommand(command, setValue, eeprom.maxValue3); break;
+      case '4': _ProcessCommand(command, setValue, eeprom.maxValue4); break;
+      case '5': _ProcessCommand(command, setValue, eeprom.maxValue5); break;
+      case '6': _ProcessCommand(command, setValue, eeprom.maxValue6); break;
+      case '7': _ProcessCommand(command, setValue, eeprom.maxValue7); break;
+      case '8': _ProcessCommand(command, setValue, eeprom.maxValue8); break;
       default:
         Serial.write("Unknown command");
         while (Serial.available())
@@ -253,20 +268,55 @@ void ProcessCommand()
     }     
   }
 }
-int getWeight()
+int getZirafaPercentage(double pressure)
 {
-  switch (mode)
+  double numerator = pressure * 100 * 10;
+  switch (zirafaMode)
   {
-    case 0: return getPressure() * eeprom.multiplier0;
-    case 1: return getPressure() * eeprom.multiplier1;
-    case 2: return getPressure() * eeprom.multiplier2;
-    case 3: return getPressure() * eeprom.multiplier3;
-    case 4: return getPressure() * eeprom.multiplier4;
-    case 5: return getPressure() * eeprom.multiplier5;
-    case 6: return getPressure() * eeprom.multiplier6;
-    case 7: return getPressure() * eeprom.multiplier7;
-    case 8: return getPressure() * eeprom.multiplier8;
-    case 9: return getPressure() * eeprom.multiplier9;
+    case 0: return numerator / eeprom.maxValue0;
+    case 1: return numerator / eeprom.maxValue1;
+    case 2: return numerator / eeprom.maxValue2;
+    case 3: return numerator / eeprom.maxValue3;
+    case 4: return numerator / eeprom.maxValue4;
+    case 5: return numerator / eeprom.maxValue5;
+    case 6: return numerator / eeprom.maxValue6;
+    case 7: return numerator / eeprom.maxValue7;
+    case 8: return numerator / eeprom.maxValue8;
+  }
+}
+
+void printZirafaMode()
+{
+  lcd.setCursor(7, 1);
+  switch (zirafaMode)
+  {
+    case 0:
+      lcd.print("b1p1 ");
+      break;
+    case 1:
+      lcd.print("b1p2 ");
+      break;
+    case 2:
+      lcd.print("b1p3 ");
+      break;
+    case 3:
+      lcd.print("b2p1 ");
+      break;
+    case 4:
+      lcd.print("b2p2 ");
+      break;
+    case 5:
+      lcd.print("b2p3 ");
+      break;
+    case 6:
+      lcd.print("b3p1 ");
+      break;
+    case 7:
+      lcd.print("b3p2 ");
+      break;
+    case 8:
+      lcd.print("b3p3 ");
+      break;
   }
 }
 void loop() {
@@ -275,40 +325,76 @@ void loop() {
     //SendValue('x', xAngle);
     //SendValue('y', yAngle);
     //delay(100);
-    
-    displayValue(xAngle, 0, 2, 3, 0);
-    lcd.print("| ");
-    displayValue(yAngle, 1, 2, 3, 0);
-    lcd.print("- ");
-    
-    displayValue(getPressure(), 0, 12, 6, 1);
-    lcd.print("MPa");
 
-    displayValue(getWeight(), 1, 11, 6, 0);
-    lcd.print("kg");
-
-    displayValue(mode + 1, 1, 15, 1, 0);
-    
-    //lcd.print(getPressure());
-    lcd.print("   ");
-
-    ProcessCommand(); 
-    
-    if (300 < analogRead(BUTTONS_PIN)) //second should be > 500
+    if  (xAngle > lastXAngle + eeprom.angleSensitivity || xAngle < lastXAngle - eeprom.angleSensitivity)
     {
-      digitalWrite(LED_PIN, HIGH);
-      if (!pressed)
-      {
-        pressed = true;
-        mode++;
-        if (mode == eeprom.positionCount)
-          mode = 0;
-      }
+      lastXAngle = xAngle;
+    }
+    displayValue(lastXAngle, 0, 2, 3, 0);
+    lcd.write(0xDF); //°
+    lcd.print("|  ");
+
+    if  (yAngle > lastYAngle + eeprom.angleSensitivity || yAngle < lastYAngle - eeprom.angleSensitivity)
+    {
+      lastYAngle = yAngle;
     }
     else
+    displayValue(lastYAngle, 1, 2, 3, 0);
+    lcd.write(0xDF); //°
+    lcd.print("-  ");
+    float pressure = getPressure();
+    lcd.setCursor(7, 0);
+    switch (mayorMode)
+    {
+      case 0:
+        if (pressure > lastPressure + (double)eeprom.pressureSensitivity / 10.0  || pressure < lastPressure - (double)eeprom.pressureSensitivity / 10.0 )
+        {
+          lastPressure = pressure;  
+        }
+        lcd.print(" Pressure");
+        displayValue(lastPressure, 1, 12, 6, 1);
+        lcd.print("MPa");
+        break;
+      case 1:
+        lcd.print("   Zirafa");
+        printZirafaMode();
+        displayValue(getZirafaPercentage(pressure), 1, 14, 3, 0);
+        lcd.print("%");
+
+        break;
+    }
+    ProcessCommand(); 
+
+    int buttonsValue = analogRead(BUTTONS_PIN);
+    if (buttonsValue < 300) //both released
     {
       digitalWrite(LED_PIN, LOW);
       pressed = false;
+    }
+    
+    else 
+    {
+      if (!pressed)
+      {  
+        pressed = true;    
+        if (buttonsValue < 500) //button1
+        {
+          if (mayorMode == 1) //zirafaMode
+          {
+            zirafaMode++;
+            if (zirafaMode == 9)
+              zirafaMode = 0;
+          }
+        }
+        else //button2
+        {
+          pressed = true;
+          digitalWrite(LED_PIN, HIGH);
+          mayorMode++;
+          if (mayorMode > MAX_MAYOR_MODE)
+            mayorMode = 0;
+        }
+      }
     }
     
     /*if (mode == 0)
