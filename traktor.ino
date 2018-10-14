@@ -10,6 +10,7 @@
 #define BUTTONS_PIN 7 //A7
 #define PRESSURE_PIN 0 //A0
 #define LED_PIN 6 //D6
+#define BUZZER_PIN 16 //A2 is D16
 
 
 MPU6050 accelerometr;
@@ -35,7 +36,9 @@ struct Eeprom
   int16_t pressureOffset; //o
   int16_t pressureDivider; //d
   int16_t angleSensitivity; //s
+  int16_t angleLimit; //l
   int16_t pressureSensitivity; //S  
+  int16_t pressureLimit; //L   
   int16_t maxValue0; //1
   int16_t maxValue1; //1
   int16_t maxValue2; //2
@@ -45,7 +48,6 @@ struct Eeprom
   int16_t maxValue6; //6
   int16_t maxValue7; //7
   int16_t maxValue8; //8
-  int16_t limit;
 } eeprom;
 
 void fillAngles(int &xAngle, int &yAngle)
@@ -104,6 +106,7 @@ void setup() {
     }
 
     pinMode(LED_PIN, OUTPUT);
+    pinMode(BUZZER_PIN, OUTPUT);
 }
 
 float getPressure()
@@ -221,7 +224,9 @@ void ProcessCommand()
          Serial.write("x (xDegreeComp) - kompenzace predo-zadni osy\n");
          Serial.write("y (yDegreeComp) - kompenzace levo-prave osy\n");
          Serial.write("s (angleSensitivity) - senzitivita uhlu\n");
-         Serial.write("S (pressureSensitivity) - tlakova senzitivita * 10\n");   
+         Serial.write("l (angleLimit) - Mez nálkonu pro signalizaci ve °\n");
+         Serial.write("S (pressureSensitivity) - tlakova senzitivita * 10\n");
+         Serial.write("L (pressureLimit) - Mez tlaku pro signalizaci v %\n");   
          Serial.write("o (pressureOffset) - ofset tlakoveho senzoru\n");
          Serial.write("d (pressureDivider) - delitel tlakového senzoru\n");
          Serial.write("0 (maxValue0) - maximalni hodnota pro bod1 a pozici1 \n");
@@ -248,7 +253,9 @@ void ProcessCommand()
       case 'o': _ProcessCommand(command, setValue, eeprom.pressureOffset); break;
       case 'd': _ProcessCommand(command, setValue, eeprom.pressureDivider); break;
       case 's': _ProcessCommand(command, setValue, eeprom.angleSensitivity); break;
+      case 'l': _ProcessCommand(command, setValue, eeprom.angleLimit); break;
       case 'S': _ProcessCommand(command, setValue, eeprom.pressureSensitivity); break;
+      case 'L': _ProcessCommand(command, setValue, eeprom.pressureLimit); break;
       case '0': _ProcessCommand(command, setValue, eeprom.maxValue0); break;
       case '1': _ProcessCommand(command, setValue, eeprom.maxValue1); break;
       case '2': _ProcessCommand(command, setValue, eeprom.maxValue2); break;
@@ -319,13 +326,19 @@ void printZirafaMode()
       break;
   }
 }
+void alarm(int state)
+{
+  digitalWrite(LED_PIN, state);
+  digitalWrite(BUZZER_PIN, state);
+}
 void loop() {
     int xAngle, yAngle;
     fillAngles(xAngle, yAngle);
     //SendValue('x', xAngle);
     //SendValue('y', yAngle);
     //delay(100);
-
+    alarm(LOW);
+    
     if  (xAngle > lastXAngle + eeprom.angleSensitivity || xAngle < lastXAngle - eeprom.angleSensitivity)
     {
       lastXAngle = xAngle;
@@ -338,7 +351,11 @@ void loop() {
     {
       lastYAngle = yAngle;
     }
-    else
+    if (lastYAngle > eeprom.angleLimit)
+    {
+      alarm(HIGH);
+    }
+    
     displayValue(lastYAngle, 1, 2, 3, 0);
     lcd.write(0xDF); //°
     lcd.print("-  ");
@@ -351,24 +368,27 @@ void loop() {
         {
           lastPressure = pressure;  
         }
-        lcd.print(" Pressure");
+        lcd.print("     Tlak");
         displayValue(lastPressure, 1, 12, 6, 1);
         lcd.print("MPa");
         break;
       case 1:
         lcd.print("   Zirafa");
         printZirafaMode();
-        displayValue(getZirafaPercentage(pressure), 1, 14, 3, 0);
+        int zirafaPercentage = getZirafaPercentage(pressure);
+        displayValue(zirafaPercentage, 1, 14, 3, 0);
         lcd.print("%");
-
+        if (zirafaPercentage > eeprom.pressureLimit)
+        {
+          alarm(HIGH);
+        }
         break;
-    }
+    } 
     ProcessCommand(); 
 
     int buttonsValue = analogRead(BUTTONS_PIN);
     if (buttonsValue < 300) //both released
     {
-      digitalWrite(LED_PIN, LOW);
       pressed = false;
     }
     
@@ -389,7 +409,6 @@ void loop() {
         else //button2
         {
           pressed = true;
-          digitalWrite(LED_PIN, HIGH);
           mayorMode++;
           if (mayorMode > MAX_MAYOR_MODE)
             mayorMode = 0;
