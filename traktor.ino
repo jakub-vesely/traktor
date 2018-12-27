@@ -11,7 +11,9 @@
 #define PRESSURE_PIN 0 //A0
 #define LED_PIN 6 //D6
 #define BUZZER_PIN 16 //A2 is D16
-
+#define ALARM_STEPS 4
+#define TYPE_ANGLE_LIMIT 1
+#define TYPE_PRESSURE_LIMIT 2
 
 MPU6050 accelerometr;
 int MPUOffsets[6] = { -707, -3158, 952, 167, 54,  -258 }; //source: https://forum.arduino.cc/index.php?action=dlattach;topic=446713.0;attach=193816
@@ -24,6 +26,7 @@ int mayorMode = 0;
 
 int zirafaMode = 0;
 bool pressed = false;
+bool isAlarm = false;
 
 float lastPressure = 0;
 int lastXAngle = 0;
@@ -107,6 +110,8 @@ void setup() {
 
     pinMode(LED_PIN, OUTPUT);
     pinMode(BUZZER_PIN, OUTPUT);
+    alarm(1, TYPE_ANGLE_LIMIT); // short beep
+    alarm(1, TYPE_PRESSURE_LIMIT);
 }
 
 float getPressure()
@@ -326,18 +331,66 @@ void printZirafaMode()
       break;
   }
 }
-void alarm(int state)
+
+void alarm(int state, int type)
 {
-  digitalWrite(LED_PIN, state);
-  digitalWrite(BUZZER_PIN, state);
+  int frequency = type == TYPE_ANGLE_LIMIT ? 880 : 1760; //A5,A6 
+  int on_duration = state * 60;
+  int off_duration = (ALARM_STEPS - state) * 60;
+  if (on_duration > 0)
+  {
+    digitalWrite(LED_PIN, HIGH);
+    tone(BUZZER_PIN, frequency, on_duration + on_duration / 2); //I have to add some duration to be covered time when is processed main program - only this way is possible to have uninterupted beep
+    delay(on_duration);
+    //
+  }
+  if (off_duration > 0)
+  {
+    digitalWrite(LED_PIN, LOW);
+    delay(off_duration);
+  }
 }
+
+bool testAlarm(int abs_value, int limit, int type)
+{
+  if (abs_value > limit)
+  {
+    alarm(4, type);
+    return true;
+  }
+  
+  if ((double)abs_value > (double)limit * 0.9)
+  {
+    alarm(3, type);
+    return true;
+  }
+  
+  if ((double)abs_value > (double)limit * 0.8)
+  {
+    alarm(2, type);
+    return true;
+  }
+  
+  if ((double)abs_value > (double)limit * 0.7)
+  {
+    alarm(1, type);
+    return true;
+  }
+  
+  return false; 
+}
+
 void loop() {
     int xAngle, yAngle;
     fillAngles(xAngle, yAngle);
     //SendValue('x', xAngle);
     //SendValue('y', yAngle);
     //delay(100);
-    alarm(LOW);
+    if (!isAlarm)
+    {
+      alarm(0, TYPE_PRESSURE_LIMIT); //any type
+    }
+    ;isAlarm = false;
     
     if  (xAngle > lastXAngle + eeprom.angleSensitivity || xAngle < lastXAngle - eeprom.angleSensitivity)
     {
@@ -351,9 +404,10 @@ void loop() {
     {
       lastYAngle = yAngle;
     }
-    if (lastYAngle > eeprom.angleLimit)
+
+    if (testAlarm(abs(lastYAngle), eeprom.angleLimit, TYPE_ANGLE_LIMIT))
     {
-      alarm(HIGH);
+      isAlarm = true;
     }
     
     displayValue(lastYAngle, 1, 2, 3, 0);
@@ -378,10 +432,8 @@ void loop() {
         int zirafaPercentage = getZirafaPercentage(pressure);
         displayValue(zirafaPercentage, 1, 14, 3, 0);
         lcd.print("%");
-        if (zirafaPercentage > eeprom.pressureLimit)
-        {
-          alarm(HIGH);
-        }
+        if (testAlarm(zirafaPercentage, eeprom.pressureLimit, TYPE_PRESSURE_LIMIT))
+          isAlarm = true;
         break;
     } 
     ProcessCommand(); 
@@ -414,11 +466,5 @@ void loop() {
             mayorMode = 0;
         }
       }
-    }
-    
-    /*if (mode == 0)
-      digitalWrite(11, HIGH);
-    else
-      digitalWrite(11, LOW);
-   */   
+    }  
 }
