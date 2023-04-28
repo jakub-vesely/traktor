@@ -1,5 +1,4 @@
 #include "Wire.h"
-#include "Math.h"
 #include "I2Cdev.h"
 #include "MPU6050.h"
 #include <EEPROM.h>
@@ -8,21 +7,28 @@
 #define NUMBER_BUFFER_SIZE 8
 #define PRESSURE_OFFSET 99 //teoretically 102
 #define BUTTONS_PIN 7 //A7
-#define PRESSURE_PIN 0 //A0
+#define PRESSURE_PIN 1 //A1
 #define LED_PIN 6 //D6
-#define BUZZER_PIN 16 //A2 is D16
+#define BUZZER_PIN 16 //changed to A3=D17 //A2 is D16
+#define HALL_INPUT_PIN 2 
+#define HALL_LED_1_PIN 11
+#define HALL_LED_2_PIN 9
+#define HALL_LED_3_PIN 8
+#define HALL_LED_4_PIN 7
+
 #define ALARM_STEPS 4
 #define TYPE_ANGLE_LIMIT 1
 #define TYPE_PRESSURE_LIMIT 2
 
+
 MPU6050 accelerometr;
-int MPUOffsets[6] = { -707, -3158, 952, 167, 54,  -258 }; //source: https://forum.arduino.cc/index.php?action=dlattach;topic=446713.0;attach=193816
-LiquidCrystal lcd(12, 10, 5, 4, 3, 2);
+int MPUOffsets[6] = { -531, 1764, 1354, 54, -26, -26 }; //source: https://forum.arduino.cc/index.php?action=dlattach;topic=446713.0;attach=193816
+LiquidCrystal lcd(12, 10, 5, 4, 3, 14);
 #define ROWS 2
 #define COLUMNS 16
 
-int mayorMode = 0;
-#define MAX_MAYOR_MODE 1
+int mayorMode = 2;
+#define MAX_MAYOR_MODE 3
 
 int zirafaMode = 0;
 bool pressed = false;
@@ -31,7 +37,12 @@ bool isAlarm = false;
 float lastPressure = 0;
 int lastXAngle = 0;
 int lastYAngle = 0;
-
+int hall_counter = 0;
+unsigned long last_hall_millis = 0;
+unsigned long last_valid_hall_millis = 0;
+#define HALL_FILTER_MS 30 //30 ms => 2000 ot /min
+int hall_delay = -1; 
+int 
 struct Eeprom
 {
   int16_t xDegreeComp; //x
@@ -51,6 +62,11 @@ struct Eeprom
   int16_t maxValue6; //6
   int16_t maxValue7; //7
   int16_t maxValue8; //8
+  int16_t rpm_led1_limit;
+  int16_t rpm_led2_limit;
+  int16_t rpm_led3_limit;
+  int16_t rpm_led4_limit;
+  uint16_t hall_counter_history;
 } eeprom;
 
 void fillAngles(int &xAngle, int &yAngle)
@@ -112,6 +128,35 @@ void setup() {
     pinMode(BUZZER_PIN, OUTPUT);
     alarm(1, TYPE_ANGLE_LIMIT); // short beep
     alarm(1, TYPE_PRESSURE_LIMIT);
+
+    pinMode(HALL_INPUT_PIN, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(HALL_INPUT_PIN), hall_interrupt, RISING);
+
+    pinMode(HALL_LED_1_PIN, OUTPUT);
+    digitalWrite(HALL_LED_1_PIN, LOW);
+    pinMode(HALL_LED_2_PIN, OUTPUT);
+    digitalWrite(HALL_LED_2_PIN, LOW);
+
+    pinMode(HALL_LED_3_PIN, OUTPUT);
+    digitalWrite(HALL_LED_3_PIN, LOW);
+
+    pinMode(HALL_LED_4_PIN, OUTPUT);
+    digitalWrite(HALL_LED_4_PIN, LOW);
+
+    last_hall_millis = millis();
+}
+
+void hall_interrupt(){
+  unsigned long milis = millis();
+  if (last_hall_millis + HALL_FILTER_MS < milis){ //hall sensor generates a lot of interrupts on a sensitivity boundary
+    hall_counter++;
+    
+    if (last_valid_hall_millis > 0){
+      hall_delay = milis - last_valid_hall_millis;      
+    }
+    last_valid_hall_millis = milis;
+  }
+  last_hall_millis = milis;
 }
 
 float getPressure()
@@ -234,6 +279,10 @@ void ProcessCommand()
          Serial.write("L (pressureLimit) - Mez tlaku pro signalizaci v %\n");   
          Serial.write("o (pressureOffset) - ofset tlakoveho senzoru\n");
          Serial.write("d (pressureDivider) - delitel tlakového senzoru\n");
+         Serial.write("A (rpm_led1_limit) - limit ot/min pro první zelenou LED\n");
+         Serial.write("B (rpm_led2_limit) - limit ot/min pro druhou zelenou LED\n");
+         Serial.write("C (rpm_led3_limit) - limit ot/min pro žlutou LED\n");
+         Serial.write("D (rpm_led4_limit) - limit ot/min pro červenou LED\n");
          Serial.write("0 (maxValue0) - maximalni hodnota pro bod1 a pozici1 \n");
          Serial.write("1 (maxValue1) - maximalni hodnota pro bod1 a pozici2 \n");
          Serial.write("2 (maxValue2) - maximalni hodnota pro bod1 a pozici3 \n");
@@ -261,6 +310,10 @@ void ProcessCommand()
       case 'l': _ProcessCommand(command, setValue, eeprom.angleLimit); break;
       case 'S': _ProcessCommand(command, setValue, eeprom.pressureSensitivity); break;
       case 'L': _ProcessCommand(command, setValue, eeprom.pressureLimit); break;
+      case 'A': _ProcessCommand(command, setValue, eeprom.rpm_led1_limit); break;
+      case 'B': _ProcessCommand(command, setValue, eeprom.rpm_led2_limit); break;
+      case 'C': _ProcessCommand(command, setValue, eeprom.rpm_led3_limit); break;
+      case 'D': _ProcessCommand(command, setValue, eeprom.rpm_led4_limit); break;
       case '0': _ProcessCommand(command, setValue, eeprom.maxValue0); break;
       case '1': _ProcessCommand(command, setValue, eeprom.maxValue1); break;
       case '2': _ProcessCommand(command, setValue, eeprom.maxValue2); break;
@@ -380,6 +433,21 @@ bool testAlarm(int abs_value, int limit, int type)
   return false; 
 }
 
+int process_rpm(){
+  int rpm = 0;
+  if (hall_delay > 0){
+    rpm =  (int)(1.0/ (float)(hall_delay) * 60000) ;
+    if (last_valid_hall_millis + 2000 < millis()){ //it is expected that speed will be higher than 30 rot/min 
+      hall_delay = 0;
+    }
+  } 
+  digitalWrite(HALL_LED_1_PIN, rpm > eeprom.rpm_led1_limit ? HIGH : LOW);
+  digitalWrite(HALL_LED_2_PIN, rpm > eeprom.rpm_led2_limit ? HIGH : LOW);
+  digitalWrite(HALL_LED_3_PIN, rpm > eeprom.rpm_led3_limit ? HIGH : LOW);
+  digitalWrite(HALL_LED_4_PIN, rpm > eeprom.rpm_led4_limit ? HIGH : LOW);
+  return rpm;
+}
+
 void loop() {
     int xAngle, yAngle;
     fillAngles(xAngle, yAngle);
@@ -415,6 +483,8 @@ void loop() {
     lcd.print("-  ");
     float pressure = getPressure();
     lcd.setCursor(7, 0);
+
+    int rpm = process_rpm();
     switch (mayorMode)
     {
       case 0:
@@ -426,15 +496,31 @@ void loop() {
         displayValue(lastPressure, 1, 12, 6, 1);
         lcd.print("MPa");
         break;
-      case 1:
+      case 1: {
         lcd.print("   Zirafa");
         printZirafaMode();
         int zirafaPercentage = getZirafaPercentage(pressure);
         displayValue(zirafaPercentage, 1, 14, 3, 0);
         lcd.print("%");
-        if (testAlarm(zirafaPercentage, eeprom.pressureLimit, TYPE_PRESSURE_LIMIT))
+        if (testAlarm(zirafaPercentage, eeprom.pressureLimit, TYPE_PRESSURE_LIMIT)){
           isAlarm = true;
+        }
         break;
+      }
+      case 2: {
+        lcd.print("   Otacky");
+        lcd.setCursor(7, 1);
+        displayValue(rpm, 1, 12, 6, 0);
+        lcd.print("o/m");
+        break;
+      }
+      case 3: {
+        lcd.print("   Provoz");
+        lcd.setCursor(7, 1);
+        displayValue(rpm, 1, 12, 6, 0);
+        lcd.print("o/m");
+        break;
+      }
     } 
     ProcessCommand(); 
 
@@ -443,7 +529,6 @@ void loop() {
     {
       pressed = false;
     }
-    
     else 
     {
       if (!pressed)
