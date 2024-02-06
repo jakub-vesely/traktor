@@ -8,8 +8,8 @@
 #define PRESSURE_OFFSET 99 //teoretically 102
 #define BUTTONS_PIN 7 //A7
 #define PRESSURE_PIN 1 //A1
-#define LED_PIN 6 //D6
-#define BUZZER_PIN 16 //changed to A3=D17 //A2 is D16
+#define LED_PIN 13 //D13 
+#define BUZZER_PIN 17 //changed to A3=D17 //A2 is D16
 #define HALL_INPUT_PIN 2 
 #define HALL_LED_1_PIN 11
 #define HALL_LED_2_PIN 9
@@ -23,7 +23,7 @@
 
 MPU6050 accelerometr;
 int MPUOffsets[6] = { -531, 1764, 1354, 54, -26, -26 }; //source: https://forum.arduino.cc/index.php?action=dlattach;topic=446713.0;attach=193816
-LiquidCrystal lcd(12, 10, 5, 4, 3, 14);
+LiquidCrystal lcd(12, 10, 6, 5, 4, 3);
 #define ROWS 2
 #define COLUMNS 16
 
@@ -42,7 +42,7 @@ unsigned long last_hall_millis = 0;
 unsigned long last_valid_hall_millis = 0;
 #define HALL_FILTER_MS 30 //30 ms => 2000 ot /min
 int hall_delay = -1; 
-int 
+
 struct Eeprom
 {
   int16_t xDegreeComp; //x
@@ -67,7 +67,8 @@ struct Eeprom
   int16_t rpm_led3_limit;
   int16_t rpm_led4_limit;
   uint16_t hall_counter_history;
-} eeprom;
+};
+Eeprom eeprom;
 
 void fillAngles(int &xAngle, int &yAngle)
 {
@@ -445,10 +446,12 @@ int process_rpm(){
   digitalWrite(HALL_LED_2_PIN, rpm > eeprom.rpm_led2_limit ? HIGH : LOW);
   digitalWrite(HALL_LED_3_PIN, rpm > eeprom.rpm_led3_limit ? HIGH : LOW);
   digitalWrite(HALL_LED_4_PIN, rpm > eeprom.rpm_led4_limit ? HIGH : LOW);
+
   return rpm;
 }
 
 void loop() {
+
     int xAngle, yAngle;
     fillAngles(xAngle, yAngle);
     //SendValue('x', xAngle);
@@ -461,7 +464,7 @@ void loop() {
     ;isAlarm = false;
     
     if  (xAngle > lastXAngle + eeprom.angleSensitivity || xAngle < lastXAngle - eeprom.angleSensitivity)
-    {
+     {
       lastXAngle = xAngle;
     }
     displayValue(lastXAngle, 0, 2, 3, 0);
@@ -510,22 +513,22 @@ void loop() {
       case 2: {
         lcd.print("   Otacky");
         lcd.setCursor(7, 1);
-        displayValue(rpm, 1, 12, 6, 0);
-        lcd.print("o/m");
+        displayValue(rpm, 1, 11, 6, 0);
+        lcd.print("ot/m");
         break;
       }
       case 3: {
         lcd.print("   Provoz");
         lcd.setCursor(7, 1);
-        displayValue(rpm, 1, 12, 6, 0);
-        lcd.print("o/m");
+        displayValue(hall_counter, 1, 13, 6, 0);
+        lcd.print("ot");
         break;
       }
     } 
     ProcessCommand(); 
 
     int buttonsValue = analogRead(BUTTONS_PIN);
-    if (buttonsValue < 300) //both released
+    if (buttonsValue < 450) //both released
     {
       pressed = false;
     }
@@ -534,7 +537,7 @@ void loop() {
       if (!pressed)
       {  
         pressed = true;    
-        if (buttonsValue < 500) //button1
+        if (buttonsValue > 600) //button1
         {
           if (mayorMode == 1) //zirafaMode
           {
