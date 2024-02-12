@@ -8,18 +8,20 @@
 #define PRESSURE_OFFSET 99 //teoretically 102
 #define BUTTONS_PIN 7 //A7
 #define PRESSURE_PIN 1 //A1
-#define LED_PIN 13 //D13 
+#define LED_PIN 13 //D13
 #define BUZZER_PIN 17 //changed to A3=D17 //A2 is D16
-#define HALL_INPUT_PIN 2 
+#define HALL_INPUT_PIN 2
 #define HALL_LED_1_PIN 11
 #define HALL_LED_2_PIN 9
 #define HALL_LED_3_PIN 8
 #define HALL_LED_4_PIN 7
+#define HALL_FILTER_MS 30 //30 ms => 2000 ot /min
 
 #define ALARM_STEPS 4
 #define TYPE_ANGLE_LIMIT 1
 #define TYPE_PRESSURE_LIMIT 2
 
+#define ROTATION_STORE_DELAY_S 2 * 60
 
 MPU6050 accelerometr;
 int MPUOffsets[6] = { -531, 1764, 1354, 54, -26, -26 }; //source: https://forum.arduino.cc/index.php?action=dlattach;topic=446713.0;attach=193816
@@ -37,12 +39,14 @@ bool isAlarm = false;
 float lastPressure = 0;
 int lastXAngle = 0;
 int lastYAngle = 0;
-int hall_counter = 0;
-unsigned long last_hall_millis = 0;
-unsigned long last_valid_hall_millis = 0;
-#define HALL_FILTER_MS 30 //30 ms => 2000 ot /min
-int hall_delay = -1; 
 
+volatile uint16_t hall_counter = 0;
+volatile int hall_delay = -1;
+volatile unsigned long last_hall_millis = 0;
+volatile unsigned long last_valid_hall_millis = 0;
+
+unsigned long last_stored_rotations_sec = 0;
+bool flag = false;
 struct Eeprom
 {
   int16_t xDegreeComp; //x
@@ -51,8 +55,8 @@ struct Eeprom
   int16_t pressureDivider; //d
   int16_t angleSensitivity; //s
   int16_t angleLimit; //l
-  int16_t pressureSensitivity; //S  
-  int16_t pressureLimit; //L   
+  int16_t pressureSensitivity; //S
+  int16_t pressureLimit; //L
   int16_t maxValue0; //1
   int16_t maxValue1; //1
   int16_t maxValue2; //2
@@ -66,21 +70,21 @@ struct Eeprom
   int16_t rpm_led2_limit;
   int16_t rpm_led3_limit;
   int16_t rpm_led4_limit;
-  uint16_t hall_counter_history;
+  uint16_t rotations;
 };
 Eeprom eeprom;
 
 void fillAngles(int &xAngle, int &yAngle)
 {
   const int maxCount = 100;
-  
+
   int16_t ax, ay, az;
   long ax_p = 0;
   long ay_p = 0;
   long az_p = 0;
   float x, y, z;
-  
-  int count = 0;  
+
+  int count = 0;
   while (count++ < maxCount)
   {
     accelerometr.getAcceleration(&ax, &ay, &az);
@@ -88,14 +92,14 @@ void fillAngles(int &xAngle, int &yAngle)
     ay_p = ay_p + ay;
     az_p = az_p + az;
   }
-    
+
   x = ax_p / maxCount;
   y = ay_p / maxCount;
   z = az_p / maxCount;
 
-    
+
   xAngle = (int)(atan2(x, sqrt(square(y) + square(z)))/(M_PI/180)) + eeprom.xDegreeComp;
-  yAngle = (int)(atan2(y, sqrt(square(x) + square(z)))/(M_PI/180)) + eeprom.yDegreeComp;  
+  yAngle = (int)(atan2(y, sqrt(square(x) + square(z)))/(M_PI/180)) + eeprom.yDegreeComp;
 }
 
 void ResetEeprom()
@@ -116,7 +120,7 @@ void setup() {
     accelerometr.setXGyroOffset(MPUOffsets[3]);
     accelerometr.setYGyroOffset(MPUOffsets[4]);
     accelerometr.setZGyroOffset(MPUOffsets[5]);
-      
+
     lcd.begin(COLUMNS, ROWS);
 
     EEPROM.get(0, eeprom);
@@ -130,6 +134,8 @@ void setup() {
     alarm(1, TYPE_ANGLE_LIMIT); // short beep
     alarm(1, TYPE_PRESSURE_LIMIT);
 
+    last_hall_millis = millis();
+    hall_counter = eeprom.rotations;
     pinMode(HALL_INPUT_PIN, INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(HALL_INPUT_PIN), hall_interrupt, RISING);
 
@@ -143,35 +149,33 @@ void setup() {
 
     pinMode(HALL_LED_4_PIN, OUTPUT);
     digitalWrite(HALL_LED_4_PIN, LOW);
-
-    last_hall_millis = millis();
 }
 
 void hall_interrupt(){
-  unsigned long milis = millis();
-  if (last_hall_millis + HALL_FILTER_MS < milis){ //hall sensor generates a lot of interrupts on a sensitivity boundary
+  unsigned long mill = millis();
+  if (last_hall_millis + HALL_FILTER_MS < mill){ //hall sensor generates a lot of interrupts on a sensitivity boundary
     hall_counter++;
-    
+
     if (last_valid_hall_millis > 0){
-      hall_delay = milis - last_valid_hall_millis;      
+      hall_delay = mill - last_valid_hall_millis;
     }
-    last_valid_hall_millis = milis;
+    last_valid_hall_millis = mill;
   }
-  last_hall_millis = milis;
+  last_hall_millis = mill;
 }
 
 float getPressure()
 {
   /* 5V/1024bit = 4.883 mV/bit
    * offset_bit = 0 MPa  ... 0.5V  ... 102 bit  \
-   * range_bit =                                 > 820 bit 
+   * range_bit =                                 > 820 bit
    * max_bit =    16MPa ... 4.5V  ... 922 bit   /
-   * 
+   *
    * p(Mpa) / range_MPa = (analog_bit - offset_bit) / range_bit;
-   * p(Mpa) = (analog_bit - offset_bit) * range_MPa / range_bit; 
+   * p(Mpa) = (analog_bit - offset_bit) * range_MPa / range_bit;
    */
   return ((float)analogRead(PRESSURE_PIN) - PRESSURE_OFFSET + eeprom.pressureOffset) * 16 / (820 + eeprom.pressureDivider);
-} 
+}
 
 void displayValue(float value, int row, int right, int maxDigit, int decimalCount)
 {
@@ -185,7 +189,7 @@ void displayValue(float value, int row, int right, int maxDigit, int decimalCoun
     value *= 10;
 
   int intValue = value;
-  
+
   char buffer[NUMBER_BUFFER_SIZE];
   for (int i = 0; i < NUMBER_BUFFER_SIZE; i++)
     buffer[i] = ' ';
@@ -194,7 +198,7 @@ void displayValue(float value, int row, int right, int maxDigit, int decimalCoun
   do
   {
     buffer[NUMBER_BUFFER_SIZE - 1 - pos] = (intValue % 10) + '0';
-    intValue /= 10;  
+    intValue /= 10;
     pos++;
     if (pos == decimalCount)
     {
@@ -233,19 +237,21 @@ int FillCommandValue()
         return -value;
       else
         return value;
-    } 
+    }
     char digit = Serial.read();
-    
+
     if ('-' == digit)
       negative = true;
     else
-    {  
+    {
       value *= 10;
       value += digit-'0';
     }
-  } 
+  }
 }
-void _ProcessCommand(char command, bool setValue, int16_t & eepromVariable)
+
+template <typename T>
+void _ProcessCommand(char command, bool setValue, T & eepromVariable)
 {
   if (setValue)
   {
@@ -254,9 +260,10 @@ void _ProcessCommand(char command, bool setValue, int16_t & eepromVariable)
   }
   SendValue(command, eepromVariable);
 }
+
 void ProcessCommand()
 {
-  if (Serial.available()) 
+  if (Serial.available())
   {
     char command = Serial.read();
     if (command == 'r')
@@ -277,13 +284,14 @@ void ProcessCommand()
          Serial.write("s (angleSensitivity) - senzitivita uhlu\n");
          Serial.write("l (angleLimit) - Mez nálkonu pro signalizaci ve °\n");
          Serial.write("S (pressureSensitivity) - tlakova senzitivita * 10\n");
-         Serial.write("L (pressureLimit) - Mez tlaku pro signalizaci v %\n");   
+         Serial.write("L (pressureLimit) - Mez tlaku pro signalizaci v %\n");
          Serial.write("o (pressureOffset) - ofset tlakoveho senzoru\n");
          Serial.write("d (pressureDivider) - delitel tlakového senzoru\n");
          Serial.write("A (rpm_led1_limit) - limit ot/min pro první zelenou LED\n");
          Serial.write("B (rpm_led2_limit) - limit ot/min pro druhou zelenou LED\n");
          Serial.write("C (rpm_led3_limit) - limit ot/min pro žlutou LED\n");
          Serial.write("D (rpm_led4_limit) - limit ot/min pro červenou LED\n");
+         Serial.write("R (rotations) - peristant rotation counter \n");
          Serial.write("0 (maxValue0) - maximalni hodnota pro bod1 a pozici1 \n");
          Serial.write("1 (maxValue1) - maximalni hodnota pro bod1 a pozici2 \n");
          Serial.write("2 (maxValue2) - maximalni hodnota pro bod1 a pozici3 \n");
@@ -302,7 +310,7 @@ void ProcessCommand()
     }
     Serial.read(); //expected '='
     switch (command)
-    {   
+    {
       case 'x': _ProcessCommand(command, setValue, eeprom.xDegreeComp); break;
       case 'y': _ProcessCommand(command, setValue, eeprom.yDegreeComp); break;
       case 'o': _ProcessCommand(command, setValue, eeprom.pressureOffset); break;
@@ -315,6 +323,7 @@ void ProcessCommand()
       case 'B': _ProcessCommand(command, setValue, eeprom.rpm_led2_limit); break;
       case 'C': _ProcessCommand(command, setValue, eeprom.rpm_led3_limit); break;
       case 'D': _ProcessCommand(command, setValue, eeprom.rpm_led4_limit); break;
+      case 'R': _ProcessCommand(command, setValue, eeprom.rotations); break;
       case '0': _ProcessCommand(command, setValue, eeprom.maxValue0); break;
       case '1': _ProcessCommand(command, setValue, eeprom.maxValue1); break;
       case '2': _ProcessCommand(command, setValue, eeprom.maxValue2); break;
@@ -328,10 +337,10 @@ void ProcessCommand()
         Serial.write("Unknown command");
         while (Serial.available())
         {
-          Serial.read(); //I have to clear all followed letters after unknown command 
+          Serial.read(); //I have to clear all followed letters after unknown command
         }
       break;
-    }     
+    }
   }
 }
 int getZirafaPercentage(double pressure)
@@ -388,7 +397,7 @@ void printZirafaMode()
 
 void alarm(int state, int type)
 {
-  int frequency = type == TYPE_ANGLE_LIMIT ? 880 : 1760; //A5,A6 
+  int frequency = type == TYPE_ANGLE_LIMIT ? 880 : 1760; //A5,A6
   int on_duration = state * 60;
   int off_duration = (ALARM_STEPS - state) * 60;
   if (on_duration > 0)
@@ -412,41 +421,44 @@ bool testAlarm(int abs_value, int limit, int type)
     alarm(4, type);
     return true;
   }
-  
+
   if ((double)abs_value > (double)limit * 0.9)
   {
     alarm(3, type);
     return true;
   }
-  
+
   if ((double)abs_value > (double)limit * 0.8)
   {
     alarm(2, type);
     return true;
   }
-  
+
   if ((double)abs_value > (double)limit * 0.7)
   {
     alarm(1, type);
     return true;
   }
-  
-  return false; 
+
+  return false;
 }
 
 int process_rpm(){
   int rpm = 0;
   if (hall_delay > 0){
     rpm =  (int)(1.0/ (float)(hall_delay) * 60000) ;
-    if (last_valid_hall_millis + 2000 < millis()){ //it is expected that speed will be higher than 30 rot/min 
+
+    noInterrupts();
+    unsigned long temp = last_valid_hall_millis;
+    interrupts();
+    if (temp + 2000 < millis()){ //it is expected that speed will be higher than 30 rot/min
       hall_delay = 0;
     }
-  } 
+  }
   digitalWrite(HALL_LED_1_PIN, rpm > eeprom.rpm_led1_limit ? HIGH : LOW);
   digitalWrite(HALL_LED_2_PIN, rpm > eeprom.rpm_led2_limit ? HIGH : LOW);
   digitalWrite(HALL_LED_3_PIN, rpm > eeprom.rpm_led3_limit ? HIGH : LOW);
   digitalWrite(HALL_LED_4_PIN, rpm > eeprom.rpm_led4_limit ? HIGH : LOW);
-
   return rpm;
 }
 
@@ -462,7 +474,7 @@ void loop() {
       alarm(0, TYPE_PRESSURE_LIMIT); //any type
     }
     ;isAlarm = false;
-    
+
     if  (xAngle > lastXAngle + eeprom.angleSensitivity || xAngle < lastXAngle - eeprom.angleSensitivity)
      {
       lastXAngle = xAngle;
@@ -480,7 +492,7 @@ void loop() {
     {
       isAlarm = true;
     }
-    
+
     displayValue(lastYAngle, 1, 2, 3, 0);
     lcd.write(0xDF); //°
     lcd.print("-  ");
@@ -493,7 +505,7 @@ void loop() {
       case 0:
         if (pressure > lastPressure + (double)eeprom.pressureSensitivity / 10.0  || pressure < lastPressure - (double)eeprom.pressureSensitivity / 10.0 )
         {
-          lastPressure = pressure;  
+          lastPressure = pressure;
         }
         lcd.print("     Tlak");
         displayValue(lastPressure, 1, 12, 6, 1);
@@ -520,23 +532,28 @@ void loop() {
       case 3: {
         lcd.print("   Provoz");
         lcd.setCursor(7, 1);
-        displayValue(hall_counter, 1, 13, 6, 0);
+        {
+          noInterrupts();
+          int temp = hall_counter;
+          interrupts();
+          displayValue(temp, 1, 13, 6, 0);
+        }
         lcd.print("ot");
         break;
       }
-    } 
-    ProcessCommand(); 
+    }
+    ProcessCommand();
 
     int buttonsValue = analogRead(BUTTONS_PIN);
     if (buttonsValue < 450) //both released
     {
       pressed = false;
     }
-    else 
+    else
     {
       if (!pressed)
-      {  
-        pressed = true;    
+      {
+        pressed = true;
         if (buttonsValue > 600) //button1
         {
           if (mayorMode == 1) //zirafaMode
@@ -554,5 +571,20 @@ void loop() {
             mayorMode = 0;
         }
       }
-    }  
+    }
+    unsigned long sec = millis() / 1000;
+    lcd.setCursor(0, 0);
+    lcd.print(flag ? "*" : "+");
+    if (last_stored_rotations_sec + ROTATION_STORE_DELAY_S < sec){
+      flag = flag ? false : true;
+
+      last_stored_rotations_sec = sec;
+      noInterrupts();
+      unsigned long temp = hall_counter;
+      interrupts();
+      if (eeprom.rotations != temp){
+        eeprom.rotations = temp;
+        EEPROM.put(0, eeprom);
+      }
+    }
 }
